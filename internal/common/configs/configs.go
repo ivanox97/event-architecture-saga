@@ -8,7 +8,7 @@ import (
 const (
 	// DefaultDatabaseURL is for local development only
 	// In production, always use DATABASE_URL environment variable
-	DefaultDatabaseURL = "postgres://event_saga:CHANGE_ME@localhost:5433/event_saga_db?sslmode=disable"
+	DefaultDatabaseURL = "postgres://event_saga:event_saga_pass@localhost:5433/event_saga_db?sslmode=disable"
 	DatabaseURLEnvKey  = "DATABASE_URL"
 )
 

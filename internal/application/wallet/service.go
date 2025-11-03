@@ -99,3 +99,62 @@ func (s *Service) ProcessRefund(ctx context.Context, req ProcessRefundRequest) e
 	s.logger.Info("Funds credited", logger.Field{Key: "user_id", Value: req.UserID}, logger.Field{Key: "amount", Value: req.Amount}, logger.Field{Key: "refund_id", Value: refundID})
 	return nil
 }
+
+type AddFundsRequest struct {
+	UserID string  `json:"user_id"`
+	Amount float64 `json:"amount"`
+	Reason string  `json:"reason,omitempty"`
+}
+
+func (s *Service) AddFunds(ctx context.Context, req AddFundsRequest) error {
+	if req.Amount <= 0 {
+		return fmt.Errorf("amount must be greater than 0")
+	}
+
+	if req.UserID == "" {
+		return fmt.Errorf("user_id is required")
+	}
+
+	w, err := s.RebuildWalletState(ctx, req.UserID)
+	if err != nil {
+		return fmt.Errorf("failed to rebuild wallet state: %w", err)
+	}
+
+	previousBalance := w.Balance()
+	newBalance := previousBalance + req.Amount
+
+	depositID := uuid.New().String()
+	if req.Reason == "" {
+		req.Reason = "Manual deposit"
+	}
+
+	metadata := events.EventMetadata{
+		CorrelationID: uuid.New().String(),
+		TraceID:       uuid.New().String(),
+		Timestamp:     time.Now(),
+	}
+
+	s.sequence++
+	creditEvent := events.NewFundsCredited(
+		depositID,
+		"", // No payment_id for direct deposits
+		req.UserID,
+		req.Amount,
+		previousBalance,
+		newBalance,
+		req.Reason,
+		metadata,
+		s.sequence,
+	)
+
+	if err := s.eventStore.SaveEvent(ctx, creditEvent); err != nil {
+		return fmt.Errorf("failed to save credit event: %w", err)
+	}
+
+	if err := s.eventBus.Publish(ctx, configs.TopicPayments, creditEvent); err != nil {
+		return fmt.Errorf("failed to publish credit event: %w", err)
+	}
+
+	s.logger.Info("Funds added", logger.Field{Key: "user_id", Value: req.UserID}, logger.Field{Key: "amount", Value: req.Amount}, logger.Field{Key: "deposit_id", Value: depositID}, logger.Field{Key: "new_balance", Value: newBalance})
+	return nil
+}

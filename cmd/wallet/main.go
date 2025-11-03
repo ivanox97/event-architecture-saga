@@ -86,6 +86,7 @@ func setupRouter(walletHandler *httphandler.WalletHandler, l logger.Logger) *gin
 
 	router.GET("/internal/wallet/:user_id", walletHandler.GetWallet)
 	router.POST("/internal/wallet/refund", walletHandler.ProcessRefund)
+	router.POST("/internal/wallet/add-funds", walletHandler.AddFunds)
 
 	return router
 }

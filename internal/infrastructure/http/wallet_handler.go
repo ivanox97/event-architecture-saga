@@ -66,3 +66,45 @@ func (h *WalletHandler) ProcessRefund(c *gin.Context) {
 		"amount":     req.Amount,
 	})
 }
+
+func (h *WalletHandler) AddFunds(c *gin.Context) {
+	var req wallet.AddFundsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Amount <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "amount must be greater than 0"})
+		return
+	}
+
+	if req.UserID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user_id is required"})
+		return
+	}
+
+	w, err := h.walletService.RebuildWalletState(c.Request.Context(), req.UserID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	previousBalance := w.Balance()
+
+	if err := h.walletService.AddFunds(c.Request.Context(), req); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Rebuild to get new balance
+	w, _ = h.walletService.RebuildWalletState(c.Request.Context(), req.UserID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":          "Funds added successfully",
+		"user_id":          req.UserID,
+		"amount":           req.Amount,
+		"previous_balance": previousBalance,
+		"new_balance":      w.Balance(),
+	})
+}

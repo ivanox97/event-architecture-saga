@@ -111,33 +111,64 @@ Adaptadores que conectan con el mundo exterior:
 - **Event Store**: PostgreSQL (con JSONB para eventos)
 - **Event Bus**: Redpanda (Kafka-compatible)
 - **HTTP Framework**: Gin
-- **Containerización**: Colima + Docker Compose
+- **Containerización**: Podman + podman-compose
 
 ## Cómo Ejecutar
+
+### Requisitos Previos
+
+#### 1. Instalar Podman
+
+**macOS:**
+
+```bash
+brew install podman podman-compose
+```
+
+#### 2. Iniciar Podman Machine (solo necesario la primera vez)
+
+```bash
+# Iniciar Podman machine
+podman machine init
+podman machine start
+```
+
+**⚠️ Problema de Permisos?** Si tienes errores relacionados con permisos en `~/.config`, ejecuta:
+
+```bash
+./fix-podman-permissions.sh
+```
+
+Esto solo es necesario una vez. La máquina de Podman se iniciará automáticamente cuando sea necesario.
+
+#### 3. Instalar Go (si no lo tienes)
+
+**macOS:**
+
+```bash
+brew install go
+```
 
 ### Setup Inicial
 
 ```bash
-# 1. Instalar dependencias
-brew install colima postgresql  # macOS
-# O usar PostgreSQL local si prefieres
+# 1. Clonar o navegar al proyecto
+cd app
 
-# 2. Configurar variables de entorno (opcional)
-# Copia .env.example a .env y ajusta los valores
-cp .env.example .env
+# 2. Instalar dependencias Go
+go mod download
 
-# 3. Iniciar infraestructura y servicios
+# 3. Iniciar todo el sistema
 make start
 ```
 
-Este comando:
+Este comando automáticamente:
 
-- Inicia Colima (si no está corriendo)
-- Levanta PostgreSQL y Redpanda con Docker
-- Ejecuta migraciones de base de datos
-- Inicia los 4 servicios de la aplicación
-
-**Nota**: Si Docker falla, el sistema intentará usar PostgreSQL local automáticamente.
+- ✅ Verifica que Podman esté instalado
+- ✅ Inicia la máquina de Podman (si no está corriendo)
+- ✅ Levanta PostgreSQL y Redpanda con Podman
+- ✅ Ejecuta las migraciones de base de datos
+- ✅ Inicia los 4 servicios de la aplicación (Orchestrator, Wallet, External Payment, Metrics)
 
 ### Verificar que Todo Funciona
 
@@ -147,6 +178,26 @@ make health
 
 # Ver logs
 tail -f logs/*.log
+```
+
+### Comandos Útiles
+
+```bash
+# Ver todos los comandos disponibles
+make help
+
+# Iniciar infraestructura (PostgreSQL + Redpanda)
+make up
+
+# Detener infraestructura
+make down
+
+# Iniciar/Detener máquina de Podman
+make podman-start
+make podman-stop
+
+# Verificar estado de Podman
+make podman-status
 ```
 
 ## Cómo Testear
@@ -171,44 +222,95 @@ go test ./internal/domain/saga/...
 
 ### Probar la API
 
-#### 1. Crear un Pago con Billetera
+Todos los comandos usan el mismo `user_id` por defecto (`123e4567-e89b-12d3-a456-426614174000`) para facilitar las pruebas. Puedes cambiarlo usando `USER_ID=<tu_user_id>` en cualquier comando.
+
+#### Flujo Completo de Prueba
 
 ```bash
-curl -X POST http://localhost:8080/api/payments/wallet \
-  -H "Content-Type: application/json" \
-  -d '{
-    "user_id": "123e4567-e89b-12d3-a456-426614174000",
-    "service_id": "service-123",
-    "amount": 100.0,
-    "currency": "USD"
-  }'
+# 1. Agregar fondos a la billetera
+make add-funds USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=5000.0
+
+# 2. Verificar balance
+make test-balance
+
+# 3. Crear un pago con billetera
+make test-payment AMOUNT=1500.0
+
+# 4. Verificar el estado del pago (usa el payment_id de la respuesta anterior)
+make test-payment-status PAYMENT_ID=<payment_id_de_la_respuesta>
+
+# 5. Verificar balance actualizado
+make test-balance
+
+# 6. (Opcional) Procesar un reembolso
+make test-refund PAYMENT_ID=<payment_id> AMOUNT=500.0
 ```
 
-#### 2. Consultar Estado del Pago
+#### Comandos Individuales
+
+##### 1. Agregar Fondos a una Billetera
 
 ```bash
-# Usar el payment_id de la respuesta anterior
-curl http://localhost:8080/api/v1/payments/{payment_id}
+# Agregar fondos (requerido antes de hacer pagos)
+make add-funds USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=5000.0
+
+# O cambiar el user_id y amount
+make add-funds USER_ID=<tu_user_id> AMOUNT=<cantidad>
 ```
 
-#### 3. Consultar Balance de Billetera
+##### 2. Consultar Balance de Billetera
 
 ```bash
-curl http://localhost:8081/internal/wallet/{user_id}
+# Usa el user_id por defecto
+make test-balance
+
+# O especifica un user_id diferente
+make test-balance USER_ID=123e4567-e89b-12d3-a456-426614174000
 ```
 
-#### 4. Procesar un Reembolso
+##### 3. Crear un Pago con Billetera
 
 ```bash
-curl -X POST http://localhost:8081/internal/wallet/refund \
-  -H "Content-Type: application/json" \
-  -d '{
-    "payment_id": "{payment_id}",
-    "user_id": "{user_id}",
-    "amount": 50.0,
-    "reason": "Service cancellation"
-  }'
+# Crear pago (usa user_id y amount por defecto)
+make test-payment
+
+# O especifica amount y user_id
+make test-payment USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=1500.0
 ```
+
+##### 4. Consultar Estado del Pago
+
+```bash
+# Reemplaza <payment_id> con el ID de la respuesta anterior
+make test-payment-status PAYMENT_ID=be203f47-5826-45a0-8cbd-f9d8ae59a654
+```
+
+##### 5. Crear un Pago con Tarjeta de Crédito
+
+```bash
+# Crear pago con tarjeta (usa user_id y amount por defecto)
+make test-payment-card
+
+# O especifica amount y user_id
+make test-payment-card USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=200.0
+```
+
+##### 6. Procesar un Reembolso
+
+```bash
+# Procesar reembolso (necesita payment_id y amount)
+make test-refund PAYMENT_ID=<payment_id> AMOUNT=50.0
+
+# También puedes especificar user_id si es diferente al predeterminado
+make test-refund PAYMENT_ID=<payment_id> AMOUNT=50.0 USER_ID=<user_id>
+```
+
+#### Notas
+
+- Todos los comandos usan `USER_ID=123e4567-e89b-12d3-a456-426614174000` por defecto para facilitar las pruebas
+- El `AMOUNT` por defecto es `100.0` en los comandos de pago
+- Guarda el `payment_id` de las respuestas para consultar el estado o hacer reembolsos
+- Los comandos muestran la respuesta formateada en JSON cuando es posible
 
 ## Estructura del Proyecto
 
@@ -256,11 +358,12 @@ app/
 
 ### Wallet Service (Puerto 8081)
 
-| Método | Endpoint                    | Descripción        |
-| ------ | --------------------------- | ------------------ |
-| GET    | `/internal/wallet/:user_id` | Consultar balance  |
-| POST   | `/internal/wallet/refund`   | Procesar reembolso |
-| GET    | `/health`                   | Health check       |
+| Método | Endpoint                     | Descripción                |
+| ------ | ---------------------------- | -------------------------- |
+| GET    | `/internal/wallet/:user_id`  | Consultar balance          |
+| POST   | `/internal/wallet/add-funds` | Agregar fondos a billetera |
+| POST   | `/internal/wallet/refund`    | Procesar reembolso         |
+| GET    | `/health`                    | Health check               |
 
 ### External Payment Service (Puerto 8082)
 
@@ -272,11 +375,46 @@ app/
 
 ## Comandos Útiles
 
+### Comandos de Infraestructura
+
 ```bash
 make help          # Ver todos los comandos disponibles
 make start         # Iniciar todo (infraestructura + servicios)
 make stop          # Detener todos los servicios
+make up            # Iniciar solo PostgreSQL y Redpanda
+make down          # Detener PostgreSQL y Redpanda
 make health        # Verificar estado de servicios
+make podman-start  # Iniciar máquina de Podman
+make podman-stop   # Detener máquina de Podman
+```
+
+### Comandos de Prueba de API
+
+```bash
+# Agregar fondos a una billetera
+make add-funds USER_ID=<user_id> AMOUNT=<cantidad>
+
+# Consultar balance
+make test-balance [USER_ID=<user_id>]
+
+# Crear pago con billetera
+make test-payment [USER_ID=<user_id>] [AMOUNT=<cantidad>]
+
+# Consultar estado de pago
+make test-payment-status PAYMENT_ID=<payment_id>
+
+# Crear pago con tarjeta
+make test-payment-card [USER_ID=<user_id>] [AMOUNT=<cantidad>]
+
+# Procesar reembolso
+make test-refund PAYMENT_ID=<payment_id> AMOUNT=<cantidad> [USER_ID=<user_id>]
+```
+
+**Nota**: Todos los comandos de prueba usan `USER_ID=123e4567-e89b-12d3-a456-426614174000` por defecto. Ver [Probar la API](#probar-la-api) para más detalles.
+
+### Otros Comandos
+
+```bash
 make test          # Ejecutar tests
 make clean         # Limpiar artefactos
 ```
