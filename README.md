@@ -288,11 +288,11 @@ make test-payment-status PAYMENT_ID=be203f47-5826-45a0-8cbd-f9d8ae59a654
 ##### 5. Crear un Pago con Tarjeta de Crédito
 
 ```bash
-# Crear pago con tarjeta (usa user_id y amount por defecto)
+# Crear pago con tarjeta (usa user_id, amount y card_token por defecto)
 make test-payment-card
 
-# O especifica amount y user_id
-make test-payment-card USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=200.0
+# O especifica amount, user_id y card_token
+make test-payment-card USER_ID=123e4567-e89b-12d3-a456-426614174000 AMOUNT=200.0 CARD_TOKEN=my-card-token-123
 ```
 
 ##### 6. Procesar un Reembolso
@@ -404,7 +404,7 @@ make test-payment [USER_ID=<user_id>] [AMOUNT=<cantidad>]
 make test-payment-status PAYMENT_ID=<payment_id>
 
 # Crear pago con tarjeta
-make test-payment-card [USER_ID=<user_id>] [AMOUNT=<cantidad>]
+make test-payment-card [USER_ID=<user_id>] [AMOUNT=<cantidad>] [CARD_TOKEN=<card_token>]
 
 # Procesar reembolso
 make test-refund PAYMENT_ID=<payment_id> AMOUNT=<cantidad> [USER_ID=<user_id>]

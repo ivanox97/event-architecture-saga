@@ -23,8 +23,9 @@ const (
 // CanTransitionTo checks if a state transition is valid
 func (s SagaState) CanTransitionTo(target SagaState) bool {
 	validTransitions := map[SagaState][]SagaState{
+		// Initial state can transition to either wallet or external payment flow
+		SagaInitialized: {SagaValidatingBalance, SagaSendingToGateway},
 		// Wallet payment transitions
-		SagaInitialized:       {SagaValidatingBalance},
 		SagaValidatingBalance: {SagaCompleted, SagaFailed},
 		// External payment transitions
 		SagaSendingToGateway: {SagaSentToGateway},

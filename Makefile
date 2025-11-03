@@ -29,6 +29,7 @@ start: ## Start infrastructure and all services automatically
 		echo '${YELLOW}Please ensure:${RESET}'; \
 		echo '  1. Podman is installed: ${GREEN}brew install podman podman-compose${RESET}'; \
 		echo '  2. Podman machine is running: ${GREEN}make podman-start${RESET}'; \
+		echo '  3. If permissions issue: ${GREEN}./fix-podman-permissions.sh${RESET}'; \
 		echo ''; \
 		echo '${YELLOW}Or use local PostgreSQL: ${GREEN}make setup-local-db${RESET}'; \
 		exit 1; \
@@ -93,6 +94,16 @@ stop: ## Stop all services
 		tmux kill-session -t event-saga; \
 		echo '${GREEN}✓ Tmux session stopped${RESET}'; \
 	fi
+	@pkill -f "go run" 2>/dev/null && echo '${GREEN}✓ All go run processes stopped${RESET}' || echo '${YELLOW}No go run processes found${RESET}'
+	@echo '${YELLOW}Freeing service ports...${RESET}'
+	@for port in 8080 8081 8082 8083; do \
+		pid=$$(lsof -ti:$$port 2>/dev/null); \
+		if [ -n "$$pid" ]; then \
+			kill -9 $$pid 2>/dev/null && echo '${GREEN}✓ Port '$$port' freed${RESET}' || true; \
+		fi; \
+	done
+	@echo '${YELLOW}Stopping Podman containers...${RESET}'
+	@podman-compose down 2>/dev/null && echo '${GREEN}✓ Podman containers stopped${RESET}' || echo '${YELLOW}⚠ Could not stop Podman containers (may not be running)${RESET}'
 
 # Infrastructure
 colima-status: ## Check Colima status
@@ -489,20 +500,23 @@ test-payment-status: ## Check payment status (usage: make test-payment-status PA
 	@echo '${GREEN}Checking payment status...${RESET}'
 	@curl -s http://localhost:8080/api/v1/payments/$(PAYMENT_ID) | python3 -m json.tool 2>/dev/null || cat
 
-test-payment-card: ## Create a credit card payment (usage: make test-payment-card USER_ID=user-123 AMOUNT=100)
+test-payment-card: ## Create a credit card payment (usage: make test-payment-card USER_ID=user-123 AMOUNT=100 CARD_TOKEN=token-123)
 	@USER_ID=$${USER_ID:-$(TEST_USER_ID)}; \
 	AMOUNT=$${AMOUNT:-100.0}; \
+	CARD_TOKEN=$${CARD_TOKEN:-test-card-token-123}; \
 	echo '${GREEN}Creating credit card payment...${RESET}'; \
 	echo '${YELLOW}User ID: '$$USER_ID'${RESET}'; \
 	echo '${YELLOW}Amount: '$$AMOUNT'${RESET}'; \
+	echo '${YELLOW}Card Token: '$$CARD_TOKEN'${RESET}'; \
 	RESPONSE=$$(curl -s -X POST http://localhost:8080/api/payments/creditcard \
 		-H "Content-Type: application/json" \
-		-d "{\"user_id\": \"$$USER_ID\", \"service_id\": \"test-service\", \"amount\": $$AMOUNT, \"currency\": \"USD\", \"card_number\": \"4111111111111111\", \"card_holder\": \"Test User\", \"expiry_month\": 12, \"expiry_year\": 2025, \"cvv\": \"123\"}"); \
+		-d "{\"user_id\": \"$$USER_ID\", \"service_id\": \"test-service\", \"amount\": $$AMOUNT, \"currency\": \"USD\", \"card_token\": \"$$CARD_TOKEN\"}"); \
 	echo $$RESPONSE | python3 -m json.tool 2>/dev/null || echo $$RESPONSE; \
 	echo ""; \
 	PAYMENT_ID=$$(echo $$RESPONSE | python3 -c "import sys, json; print(json.load(sys.stdin).get('payment_id', ''))" 2>/dev/null); \
 	if [ -n "$$PAYMENT_ID" ]; then \
 		echo '${GREEN}Payment created! Payment ID: '$$PAYMENT_ID'${RESET}'; \
+		echo '${YELLOW}Save this payment_id to check status later${RESET}'; \
 	fi
 
 test-refund: ## Process a refund (usage: make test-refund PAYMENT_ID=payment-id USER_ID=user-123 AMOUNT=50)

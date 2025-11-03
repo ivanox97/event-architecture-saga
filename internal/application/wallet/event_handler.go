@@ -12,18 +12,10 @@ import (
 )
 
 func (s *Service) HandleWalletPaymentRequested(ctx context.Context, event events.Event) error {
-	fmt.Printf("[HandleWalletPaymentRequested] Received event - Type: %s, Data type: %T, Data: %+v\n",
-		event.Type(), event.Data(), event.Data())
-
 	paymentData, ok := event.Data().(events.WalletPaymentRequestedData)
 	if !ok {
-		fmt.Printf("[HandleWalletPaymentRequested] ERROR: Invalid event data type - expected WalletPaymentRequestedData, got: %T, value: %+v\n",
-			event.Data(), event.Data())
 		return fmt.Errorf("invalid event data type, expected WalletPaymentRequestedData")
 	}
-
-	fmt.Printf("[HandleWalletPaymentRequested] Processing payment - PaymentID: %s, UserID: %s, Amount: %f\n",
-		paymentData.PaymentID, paymentData.UserID, paymentData.Amount)
 
 	userID := paymentData.UserID
 
@@ -73,22 +65,13 @@ func (s *Service) HandleWalletPaymentRequested(ctx context.Context, event events
 		s.sequence,
 	)
 
-	fmt.Printf("[HandleWalletPaymentRequested] Saving FundsDebited event - PaymentID: %s, PreviousBalance: %f, NewBalance: %f\n",
-		paymentData.PaymentID, previousBalance, newBalance)
-
 	if err := s.eventStore.SaveEvent(ctx, debitEvent); err != nil {
-		fmt.Printf("[HandleWalletPaymentRequested] ERROR saving debit event: %v\n", err)
 		return fmt.Errorf("failed to save debit event: %w", err)
 	}
 
-	fmt.Printf("[HandleWalletPaymentRequested] Publishing FundsDebited event to Event Bus\n")
 	if err := s.eventBus.Publish(ctx, configs.TopicPayments, debitEvent); err != nil {
-		fmt.Printf("[HandleWalletPaymentRequested] ERROR publishing debit event: %v\n", err)
 		return fmt.Errorf("failed to publish debit event: %w", err)
 	}
-
-	fmt.Printf("[HandleWalletPaymentRequested] Successfully processed - PaymentID: %s, NewBalance: %f\n",
-		paymentData.PaymentID, newBalance)
 
 	s.logger.Info("Funds debited", logger.Field{Key: "user_id", Value: userID}, logger.Field{Key: "amount", Value: paymentData.Amount})
 	return nil

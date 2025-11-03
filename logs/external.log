@@ -1,2 +1,11 @@
-[ERROR] Failed to initialize event store [error=failed to open database: sql: unknown driver "pgx" (forgotten import?)]
-exit status 1
+[GIN-debug] [WARNING] Creating an Engine instance with the Logger and Recovery middleware already attached.
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] GET    /health                   --> main.setupRouter.func1 (3 handlers)
+[INFO] Starting external payment service [port=8082]
+[INFO] Event consumers started
+[INFO] Payment sent to gateway [payment_id=7823f65b-a839-43f8-9e1b-6dad7afed788]
+[INFO] Webhook response received [payment_id=7823f65b-a839-43f8-9e1b-6dad7afed788, status=SUCCESS]

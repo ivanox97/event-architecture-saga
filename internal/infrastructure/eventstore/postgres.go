@@ -45,14 +45,10 @@ func NewPostgresEventStore(connString string) (*PostgresEventStore, error) {
 }
 
 func (es *PostgresEventStore) SaveEvent(ctx context.Context, event events.Event) error {
-	fmt.Printf("[SaveEvent] Saving event - Type: %s, ID: %s, AggregateID: %s, AggregateType: %s\n",
-		event.Type(), event.ID(), event.AggregateID(), event.AggregateType())
-
 	eventData, err := json.Marshal(event.Data())
 	if err != nil {
 		return fmt.Errorf("failed to marshal event data: %w", err)
 	}
-	fmt.Printf("[SaveEvent] Event data JSON length: %d bytes\n", len(eventData))
 
 	metadata, err := json.Marshal(event.Metadata())
 	if err != nil {
@@ -71,26 +67,20 @@ func (es *PostgresEventStore) SaveEvent(ctx context.Context, event events.Event)
 	)
 
 	if err != nil {
-		fmt.Printf("[SaveEvent] ERROR saving event: %v\n", err)
 		return fmt.Errorf("failed to save event: %w", err)
 	}
 
-	fmt.Printf("[SaveEvent] Successfully saved event - Type: %s, AggregateID: %s\n", event.Type(), event.AggregateID())
 	return nil
 }
 
 func (es *PostgresEventStore) LoadEvents(ctx context.Context, aggregateID string) ([]events.Event, error) {
-	fmt.Printf("[LoadEvents] Loading events for aggregateID: %s\n", aggregateID)
-
 	rows, err := es.db.QueryContext(ctx, selectEventsByAggregateQuery, aggregateID)
 	if err != nil {
-		fmt.Printf("[LoadEvents] ERROR querying events: %v\n", err)
 		return nil, fmt.Errorf("failed to query events: %w", err)
 	}
 	defer rows.Close()
 
 	var loadedEvents []events.Event
-	eventCount := 0
 	for rows.Next() {
 		var eventID, aggID, aggType, eventType string
 		var version int
@@ -100,32 +90,21 @@ func (es *PostgresEventStore) LoadEvents(ctx context.Context, aggregateID string
 
 		err := rows.Scan(&eventID, &aggID, &aggType, &eventType, &version, &eventDataJSON, &metadataJSON, &timestamp, &sequenceNumber)
 		if err != nil {
-			fmt.Printf("[LoadEvents] ERROR scanning row: %v\n", err)
 			return nil, fmt.Errorf("failed to scan event: %w", err)
 		}
 
-		fmt.Printf("[LoadEvents] Found event - Type: %s, ID: %s, AggregateID: %s, DataJSON length: %d\n",
-			eventType, eventID, aggID, len(eventDataJSON))
-
 		event, err := es.reconstructEvent(eventType, eventID, aggID, aggType, version, eventDataJSON, metadataJSON, timestamp.Time, sequenceNumber)
 		if err != nil {
-			fmt.Printf("[LoadEvents] ERROR reconstructing event: %v\n", err)
 			return nil, fmt.Errorf("failed to reconstruct event: %w", err)
 		}
 
-		fmt.Printf("[LoadEvents] Reconstructed event - Type: %s, Data type: %T, Data value: %+v\n",
-			event.Type(), event.Data(), event.Data())
-
 		loadedEvents = append(loadedEvents, event)
-		eventCount++
 	}
 
 	if err := rows.Err(); err != nil {
-		fmt.Printf("[LoadEvents] ERROR iterating rows: %v\n", err)
 		return nil, fmt.Errorf("error iterating events: %w", err)
 	}
 
-	fmt.Printf("[LoadEvents] Loaded %d events for aggregateID: %s\n", eventCount, aggregateID)
 	return loadedEvents, nil
 }
 
@@ -140,14 +119,10 @@ func (es *PostgresEventStore) reconstructEvent(eventType, eventID, aggID, aggTyp
 	var eventData interface{}
 	switch eventType {
 	case "WalletPaymentRequested":
-		fmt.Printf("[reconstructEvent] Unmarshaling WalletPaymentRequested - JSON: %s\n", string(eventDataJSON))
 		var data events.WalletPaymentRequestedData
 		if err := json.Unmarshal(eventDataJSON, &data); err != nil {
-			fmt.Printf("[reconstructEvent] ERROR unmarshaling WalletPaymentRequested: %v\n", err)
 			return nil, fmt.Errorf("failed to unmarshal WalletPaymentRequested data: %w", err)
 		}
-		fmt.Printf("[reconstructEvent] Successfully unmarshaled WalletPaymentRequested - PaymentID: %s, SagaID: %s\n",
-			data.PaymentID, data.SagaID)
 		eventData = data
 	case "ExternalPaymentRequested":
 		var data events.ExternalPaymentRequestedData
@@ -177,6 +152,24 @@ func (es *PostgresEventStore) reconstructEvent(eventType, eventID, aggID, aggTyp
 		var data events.PaymentGatewayResponseData
 		if err := json.Unmarshal(eventDataJSON, &data); err != nil {
 			return nil, fmt.Errorf("failed to unmarshal PaymentGatewayResponse data: %w", err)
+		}
+		eventData = data
+	case "PaymentSentToGateway":
+		var data events.PaymentSentToGatewayData
+		if err := json.Unmarshal(eventDataJSON, &data); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal PaymentSentToGateway data: %w", err)
+		}
+		eventData = data
+	case "PaymentGatewayTimeout":
+		var data events.PaymentGatewayTimeoutData
+		if err := json.Unmarshal(eventDataJSON, &data); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal PaymentGatewayTimeout data: %w", err)
+		}
+		eventData = data
+	case "PaymentRetryRequested":
+		var data events.PaymentRetryRequestedData
+		if err := json.Unmarshal(eventDataJSON, &data); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal PaymentRetryRequested data: %w", err)
 		}
 		eventData = data
 	case "WalletPaymentCompleted":

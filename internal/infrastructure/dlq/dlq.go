@@ -72,9 +72,7 @@ func (d *DLQSimulator) Publish(ctx context.Context, originalEvent events.Event, 
 
 	for _, handler := range consumers {
 		go func(h DLQHandler) {
-			if err := h(ctx, dlqEvent); err != nil {
-				fmt.Printf("Error handling DLQ event %s: %v\n", dlqEvent.DLQEventID, err)
-			}
+			_ = h(ctx, dlqEvent)
 		}(handler)
 	}
 
@@ -114,9 +112,7 @@ func (d *DLQSimulator) consumeEvents(ctx context.Context, handler DLQHandler) {
 			d.mu.RUnlock()
 
 			for _, event := range eventsCopy {
-				if err := handler(ctx, event); err != nil {
-					fmt.Printf("Error processing DLQ event %s: %v\n", event.DLQEventID, err)
-				}
+				_ = handler(ctx, event)
 			}
 
 			time.Sleep(1 * time.Second)

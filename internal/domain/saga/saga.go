@@ -88,8 +88,9 @@ func (s *Saga) ApplyEvent(event events.Event) error {
 		// External payment sent to gateway
 		return s.TransitionTo(SagaSentToGateway)
 	case "PaymentGatewayResponse":
-		// External payment response received (handled separately)
-		return nil
+		// External payment response received - transition to awaiting response state
+		// The actual completion/failure will be handled by ExternalPaymentCompleted/ExternalPaymentFailed events
+		return s.TransitionTo(SagaAwaitingResponse)
 	case "WalletPaymentCompleted", "ExternalPaymentCompleted":
 		return s.TransitionTo(SagaCompleted)
 	case "WalletPaymentFailed", "ExternalPaymentFailed":

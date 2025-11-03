@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"event-saga/internal/common/logger"
 	"event-saga/internal/domain/events"
 
 	"github.com/segmentio/kafka-go"
@@ -31,6 +32,7 @@ type eventBusImpl struct {
 	consumersMu   sync.RWMutex
 	running       bool
 	mu            sync.RWMutex
+	logger        logger.Logger
 }
 
 // newEventBusImpl creates a new EventBus instance (internal function)
@@ -46,6 +48,7 @@ func newEventBusImpl(brokers []string) (EventBus, error) {
 		readers:       make(map[string]*kafka.Reader),
 		consumers:     make(map[string][]EventHandler),
 		running:       true,
+		logger:        logger.NewMockLogger(),
 	}
 
 	return bus, nil
@@ -139,26 +142,27 @@ func (r *eventBusImpl) consumeEvents(ctx context.Context, reader *kafka.Reader, 
 				if err == context.DeadlineExceeded || err == context.Canceled {
 					continue
 				}
-				fmt.Printf("Error fetching message: %v\n", err)
+				r.logger.Error("Failed to fetch message from event bus", logger.Field{Key: "error", Value: err})
 				time.Sleep(100 * time.Millisecond)
 				continue
 			}
 
 			event, err := r.unmarshalEvent(message)
 			if err != nil {
-				fmt.Printf("Error unmarshaling event: %v\n", err)
+				r.logger.Error("Failed to unmarshal event", logger.Field{Key: "error", Value: err})
 				if err := reader.CommitMessages(ctx, message); err != nil {
-					fmt.Printf("Error committing invalid message: %v\n", err)
+					r.logger.Error("Failed to commit invalid message", logger.Field{Key: "error", Value: err})
 				}
 				continue
 			}
 
 			if err := handler(ctx, event); err != nil {
-				fmt.Printf("Error handling event %s: %v\n", event.Type(), err)
+				r.logger.Error("Handler failed to process event", logger.Field{Key: "event_type", Value: event.Type()}, logger.Field{Key: "error", Value: err})
 			}
 
 			if err := reader.CommitMessages(ctx, message); err != nil {
-				fmt.Printf("Error committing message: %v\n", err)
+				r.logger.Error("Failed to commit message after processing", logger.Field{Key: "error", Value: err})
+				// Will retry on next fetch
 			}
 		}
 	}

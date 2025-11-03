@@ -84,36 +84,24 @@ func (o *Orchestrator) rebuildSagaFromEvents(ctx context.Context, sagaID, paymen
 	var sagaEvents []events.Event
 
 	// Process all events for this paymentID (they all belong to the same saga)
-	for i, event := range eventsList {
-		fmt.Printf("[rebuildSagaFromEvents] Processing event %d/%d - Type: %s, Data type: %T\n",
-			i+1, len(eventsList), event.Type(), event.Data())
-
+	for _, event := range eventsList {
 		// Determine payment type from the first request event
 		switch e := event.Data().(type) {
 		case events.WalletPaymentRequestedData:
-			fmt.Printf("[rebuildSagaFromEvents] Matched WalletPaymentRequestedData - UserID: %s, SagaID: %s\n",
-				e.UserID, e.SagaID)
 			if paymentType == "" {
 				userID = e.UserID
 				paymentType = "wallet"
 				detectedSagaID = e.SagaID // Use sagaID from the event
-				fmt.Printf("[rebuildSagaFromEvents] Set paymentType=wallet, userID=%s, sagaID=%s\n",
-					userID, detectedSagaID)
 			}
 			sagaEvents = append(sagaEvents, event)
 		case events.ExternalPaymentRequestedData:
-			fmt.Printf("[rebuildSagaFromEvents] Matched ExternalPaymentRequestedData - UserID: %s, SagaID: %s\n",
-				e.UserID, e.SagaID)
 			if paymentType == "" {
 				userID = e.UserID
 				paymentType = "external"
 				detectedSagaID = e.SagaID // Use sagaID from the event
-				fmt.Printf("[rebuildSagaFromEvents] Set paymentType=external, userID=%s, sagaID=%s\n",
-					userID, detectedSagaID)
 			}
 			sagaEvents = append(sagaEvents, event)
 		default:
-			fmt.Printf("[rebuildSagaFromEvents] Unknown event data type %T, including in saga events\n", event.Data())
 			// Include all other events related to this payment
 			sagaEvents = append(sagaEvents, event)
 		}
@@ -136,7 +124,8 @@ func (o *Orchestrator) rebuildSagaFromEvents(ctx context.Context, sagaID, paymen
 	s := saga.NewSaga(finalSagaID, paymentID, userID, paymentType)
 	for _, event := range sagaEvents {
 		if err := s.ApplyEvent(event); err != nil {
-			o.logger.Info("Failed to apply event to saga", logger.Field{Key: "event_type", Value: event.Type()}, logger.Field{Key: "error", Value: err})
+			o.logger.Error("Failed to apply event to saga", logger.Field{Key: "event_type", Value: event.Type()}, logger.Field{Key: "error", Value: err})
+			return nil, fmt.Errorf("failed to apply event %s: %w", event.Type(), err)
 		}
 	}
 
@@ -166,15 +155,9 @@ func (o *Orchestrator) CreateWalletPayment(ctx context.Context, req CreateWallet
 		o.sequence,
 	)
 
-	fmt.Printf("[CreateWalletPayment] Created event - Type: %s, PaymentID: %s, SagaID: %s, AggregateID: %s\n",
-		event.Type(), paymentID, sagaID, event.AggregateID())
-	fmt.Printf("[CreateWalletPayment] Event Data type: %T, Event Data: %+v\n", event.Data(), event.Data())
-
 	if err := o.eventStore.SaveEvent(ctx, event); err != nil {
-		fmt.Printf("[CreateWalletPayment] ERROR saving event: %v\n", err)
 		return nil, fmt.Errorf("failed to save event: %w", err)
 	}
-	fmt.Printf("[CreateWalletPayment] Event saved successfully\n")
 
 	if err := o.eventBus.Publish(ctx, configs.TopicPayments, event); err != nil {
 		return nil, fmt.Errorf("failed to publish event: %w", err)
@@ -238,6 +221,8 @@ func (o *Orchestrator) ProcessEvent(ctx context.Context, event events.Event) err
 		return o.handleFundsDebited(ctx, event)
 	case "FundsInsufficient":
 		return o.handleFundsInsufficient(ctx, event)
+	case "PaymentSentToGateway":
+		return o.handlePaymentSentToGateway(ctx, event)
 	case "PaymentGatewayResponse":
 		return o.handlePaymentGatewayResponse(ctx, event)
 	default:
@@ -246,16 +231,10 @@ func (o *Orchestrator) ProcessEvent(ctx context.Context, event events.Event) err
 }
 
 func (o *Orchestrator) handleFundsDebited(ctx context.Context, event events.Event) error {
-	fmt.Printf("[handleFundsDebited] Received FundsDebited event\n")
-
 	data, ok := event.Data().(events.FundsDebitedData)
 	if !ok {
-		fmt.Printf("[handleFundsDebited] ERROR: Invalid event data type - expected FundsDebitedData, got: %T\n", event.Data())
 		return fmt.Errorf("invalid event data type, expected FundsDebitedData")
 	}
-
-	fmt.Printf("[handleFundsDebited] Processing - PaymentID: %s, UserID: %s, NewBalance: %f\n",
-		data.PaymentID, data.UserID, data.NewBalance)
 
 	eventsList, err := o.eventStore.LoadEvents(ctx, data.PaymentID)
 	if err != nil {
@@ -279,15 +258,9 @@ func (o *Orchestrator) handleFundsDebited(ctx context.Context, event events.Even
 		return fmt.Errorf("failed to rebuild saga: %w", err)
 	}
 
-	fmt.Printf("[handleFundsDebited] Applying event to saga - Current state: %s\n", s.CurrentState())
-
 	if err := s.ApplyEvent(event); err != nil {
-		fmt.Printf("[handleFundsDebited] ERROR applying event: %v\n", err)
 		return fmt.Errorf("failed to apply event: %w", err)
 	}
-
-	fmt.Printf("[handleFundsDebited] Event applied - New state: %s\n", s.CurrentState())
-	fmt.Printf("[handleFundsDebited] Publishing WalletPaymentCompleted\n")
 
 	return o.publishWalletPaymentCompleted(ctx, s, event)
 }
@@ -324,8 +297,31 @@ func (o *Orchestrator) handleFundsInsufficient(ctx context.Context, event events
 	return o.publishWalletPaymentFailed(ctx, s, event, "insufficient_funds")
 }
 
+func (o *Orchestrator) handlePaymentSentToGateway(ctx context.Context, event events.Event) error {
+	data, ok := event.Data().(events.PaymentSentToGatewayData)
+	if !ok {
+		return fmt.Errorf("invalid event data type, expected PaymentSentToGatewayData")
+	}
+
+	s, err := o.rebuildSagaFromEvents(ctx, data.SagaID, data.PaymentID)
+	if err != nil {
+		return fmt.Errorf("failed to rebuild saga: %w", err)
+	}
+
+	// Apply the event to update saga state (transitions to SENT_TO_GATEWAY)
+	if err := s.ApplyEvent(event); err != nil {
+		// Log the error but don't fail - the saga will be reconstructed correctly from events on next check
+		o.logger.Warn("Failed to apply PaymentSentToGateway event", logger.Field{Key: "payment_id", Value: data.PaymentID}, logger.Field{Key: "error", Value: err})
+	}
+
+	return nil
+}
+
 func (o *Orchestrator) handlePaymentGatewayResponse(ctx context.Context, event events.Event) error {
-	data := event.Data().(events.PaymentGatewayResponseData)
+	data, ok := event.Data().(events.PaymentGatewayResponseData)
+	if !ok {
+		return fmt.Errorf("invalid event data type, expected PaymentGatewayResponseData")
+	}
 
 	s, err := o.rebuildSagaFromEvents(ctx, data.SagaID, data.PaymentID)
 	if err != nil {
@@ -499,49 +495,36 @@ func (o *Orchestrator) publishExternalPaymentFailed(ctx context.Context, s *saga
 }
 
 func (o *Orchestrator) GetPaymentStatus(ctx context.Context, paymentID string) (*PaymentStatus, error) {
-	fmt.Printf("[GetPaymentStatus] Getting status for paymentID: %s\n", paymentID)
-
 	eventsList, err := o.eventStore.LoadEvents(ctx, paymentID)
 	if err != nil || len(eventsList) == 0 {
-		fmt.Printf("[GetPaymentStatus] ERROR: No events found - err: %v, count: %d\n", err, len(eventsList))
 		return nil, fmt.Errorf("payment not found: %s", paymentID)
 	}
-
-	fmt.Printf("[GetPaymentStatus] Loaded %d events\n", len(eventsList))
 
 	var sagaID string
 	var amount float64
 	var currency string
 
 	firstEvent := eventsList[0]
-	fmt.Printf("[GetPaymentStatus] First event - Type: %s, Data type: %T, Data: %+v\n",
-		firstEvent.Type(), firstEvent.Data(), firstEvent.Data())
 
 	switch e := firstEvent.Data().(type) {
 	case events.WalletPaymentRequestedData:
-		fmt.Printf("[GetPaymentStatus] Matched WalletPaymentRequestedData - SagaID: %s\n", e.SagaID)
 		sagaID = e.SagaID
 		amount = e.Amount
 		currency = e.Currency
 	case events.ExternalPaymentRequestedData:
-		fmt.Printf("[GetPaymentStatus] Matched ExternalPaymentRequestedData - SagaID: %s\n", e.SagaID)
 		sagaID = e.SagaID
 		amount = e.Amount
 		currency = e.Currency
 	default:
-		fmt.Printf("[GetPaymentStatus] WARNING: Unknown event data type %T, using default\n", firstEvent.Data())
 		sagaID = firstEvent.AggregateID()
 		amount = 0
 		currency = "USD"
 	}
 
-	fmt.Printf("[GetPaymentStatus] Calling rebuildSagaFromEvents with sagaID: %s, paymentID: %s\n", sagaID, paymentID)
 	s, err := o.rebuildSagaFromEvents(ctx, sagaID, paymentID)
 	if err != nil {
-		fmt.Printf("[GetPaymentStatus] ERROR rebuilding saga: %v\n", err)
 		return nil, fmt.Errorf("failed to rebuild saga: %w", err)
 	}
-	fmt.Printf("[GetPaymentStatus] Saga rebuilt successfully\n")
 
 	return &PaymentStatus{
 		PaymentID: s.PaymentID(),
