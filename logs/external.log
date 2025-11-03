@@ -1,0 +1,2 @@
+[ERROR] Failed to initialize event store [error=failed to open database: sql: unknown driver "pgx" (forgotten import?)]
+exit status 1

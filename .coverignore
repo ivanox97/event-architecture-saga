@@ -1,0 +1,12 @@
+# Main files
+cmd/**/*.go
+
+# Mocks
+internal/infrastructure/mock/**/*.go
+
+# Observabilidad (mocks simples)
+internal/common/**/*.go
+
+# Eventos de transición
+internal/domain/events/event.go
+
